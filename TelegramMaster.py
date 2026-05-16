@@ -9,10 +9,10 @@ from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelReque
 from telethon.tl.types import ReactionEmoji
 
 # =========================
-# STORAGE
+# STORAGE (SAFE)
 # =========================
 
-BASE_DIR = os.path.expanduser("~/TELEGRAM_MASTER_UI")
+BASE_DIR = os.path.expanduser("~/TELEGRAM_MASTER_FINAL")
 SESSION_DIR = os.path.join(BASE_DIR, "SESSIONS")
 DB_FILE = os.path.join(BASE_DIR, "accounts.json")
 
@@ -30,19 +30,13 @@ REACTIONS = ["👍", "❤️", "🔥", "😂", "😮"]
 
 def banner():
     print("""
-=====================================
-     TELEGRAM AUTOMATION TOOL
-=====================================
-   Developer : Rifat Tools Lab
-   Version   : 2.0 UI Edition
-   Features  : Reaction | Join | Leave
-                Multi Account Manager
-=====================================
+====================================
+   TELEGRAM AUTOMATION TOOL
+   Stable Final Version
+====================================
+Reaction | Join | Leave | Manager
+====================================
 """)
-
-
-def loading():
-    print("Loading system...\n")
 
 # =========================
 # DB
@@ -93,7 +87,7 @@ async def login_account(i, acc):
     return client
 
 # =========================
-# LOAD ACCOUNTS (ACTIVE ONLY)
+# LOAD ACTIVE ONLY
 # =========================
 
 async def load_all():
@@ -101,17 +95,16 @@ async def load_all():
 
     accounts = load_db()
 
-    if not accounts:
-        print("No accounts found")
-        return
+    active = [a for a in accounts if a.get("active", True)]
 
-    active_accounts = [a for a in accounts if a.get("active", True)]
+    print(f"\nLoading {len(active)} ACTIVE accounts...\n")
 
-    print(f"\nLoading {len(active_accounts)} ACTIVE accounts...\n")
-
-    for i, acc in enumerate(active_accounts, 1):
-        client = await login_account(i, acc)
-        clients.append(client)
+    for i, acc in enumerate(active, 1):
+        try:
+            client = await login_account(i, acc)
+            clients.append(client)
+        except Exception as e:
+            print("Load error:", e)
 
 # =========================
 # ADD ACCOUNT
@@ -133,7 +126,7 @@ async def add_account():
     clients.append(client)
 
 # =========================
-# SHOW ACCOUNTS
+# SHOW
 # =========================
 
 def show_accounts():
@@ -144,27 +137,42 @@ def show_accounts():
         print(f"[{i}] {status} | {acc['phone']}")
 
 # =========================
-# DISABLE / ENABLE
+# ENABLE / DISABLE
 # =========================
 
 def disable_account():
     show_accounts()
-    idx = int(input("Disable account #: ")) - 1
-
-    if 0 <= idx < len(accounts):
-        accounts[idx]["active"] = False
+    i = int(input("Disable #: ")) - 1
+    if 0 <= i < len(accounts):
+        accounts[i]["active"] = False
         save_db(accounts)
-        print("Account disabled")
+        print("Disabled")
 
 
 def enable_account():
     show_accounts()
-    idx = int(input("Enable account #: ")) - 1
-
-    if 0 <= idx < len(accounts):
-        accounts[idx]["active"] = True
+    i = int(input("Enable #: ")) - 1
+    if 0 <= i < len(accounts):
+        accounts[i]["active"] = True
         save_db(accounts)
-        print("Account enabled")
+        print("Enabled")
+
+# =========================
+# SAFE LINK PARSER (FIXED)
+# =========================
+
+def parse_link(link):
+    link = link.replace("https://t.me/", "").replace("http://t.me/", "").strip("/")
+
+    parts = link.split("/")
+
+    if len(parts) < 2:
+        raise ValueError("Invalid Telegram link")
+
+    chat = parts[0]
+    msg_id = int(parts[1])
+
+    return chat, msg_id
 
 # =========================
 # REACTION
@@ -181,6 +189,17 @@ async def send_reaction(client, chat, msg_id):
 
     print("Reaction:", emoji)
 
+async def reaction_all(link):
+    chat, msg_id = parse_link(link)
+
+    for i, client in enumerate(clients, 1):
+        print(f"\nACCOUNT {i}")
+        try:
+            await send_reaction(client, chat, msg_id)
+        except Exception as e:
+            print("Error:", e)
+        await asyncio.sleep(2)
+
 # =========================
 # JOIN / LEAVE
 # =========================
@@ -190,6 +209,8 @@ async def join_chat(client, link):
         entity = await client.get_entity(link)
         await client(JoinChannelRequest(entity))
         print("Joined:", link)
+    except UserAlreadyParticipantError:
+        print("Already joined")
     except Exception as e:
         print("Join error:", e)
 
@@ -202,24 +223,10 @@ async def leave_chat(client, link):
     except Exception as e:
         print("Leave error:", e)
 
-# =========================
-# ACTIONS (ONLY ACTIVE ACCOUNTS)
-# =========================
-
-async def reaction_all(link):
-    chat, msg_id = link.split("/")
-    msg_id = int(msg_id)
-
-    for i, client in enumerate(clients, 1):
-        await send_reaction(client, chat, msg_id)
-        await asyncio.sleep(2)
-
-
 async def join_all(link):
     for client in clients:
         await join_chat(client, link)
         await asyncio.sleep(2)
-
 
 async def leave_all(link):
     for client in clients:
@@ -232,8 +239,6 @@ async def leave_all(link):
 
 async def main():
     banner()
-    loading()
-
     await load_all()
 
     while True:
@@ -244,8 +249,8 @@ async def main():
 3. Disable Account
 4. Enable Account
 5. Reaction
-6. Join Group/Channel
-7. Leave Group/Channel
+6. Join
+7. Leave
 8. Exit
 ========================
 """)
@@ -265,7 +270,7 @@ async def main():
             enable_account()
 
         elif choice == "5":
-            link = input("chat/msg (channel/123): ")
+            link = input("Post link: ")
             await reaction_all(link)
 
         elif choice == "6":
