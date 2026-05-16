@@ -9,24 +9,40 @@ from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelReque
 from telethon.tl.types import ReactionEmoji
 
 # =========================
-# NEW UNIFIED STORAGE
+# STORAGE
 # =========================
 
-BASE_DIR = os.path.expanduser("~/TELEGRAM_MASTER")
+BASE_DIR = os.path.expanduser("~/TELEGRAM_MASTER_UI")
 SESSION_DIR = os.path.join(BASE_DIR, "SESSIONS")
 DB_FILE = os.path.join(BASE_DIR, "accounts.json")
 
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(SESSION_DIR, exist_ok=True)
 
-# =========================
-# GLOBALS
-# =========================
-
 clients = []
 accounts = []
 
 REACTIONS = ["👍", "❤️", "🔥", "😂", "😮"]
+
+# =========================
+# UI
+# =========================
+
+def banner():
+    print("""
+=====================================
+     TELEGRAM AUTOMATION TOOL
+=====================================
+   Developer : Rifat Tools Lab
+   Version   : 2.0 UI Edition
+   Features  : Reaction | Join | Leave
+                Multi Account Manager
+=====================================
+""")
+
+
+def loading():
+    print("Loading system...\n")
 
 # =========================
 # DB
@@ -47,25 +63,19 @@ def save_db(data):
         json.dump(data, f, indent=2)
 
 # =========================
-# LOGIN SYSTEM
+# LOGIN
 # =========================
 
 async def login_account(i, acc):
     session_path = os.path.join(SESSION_DIR, acc["session"])
 
-    client = TelegramClient(
-        session_path,
-        acc["api_id"],
-        acc["api_hash"]
-    )
-
+    client = TelegramClient(session_path, acc["api_id"], acc["api_hash"])
     await client.connect()
 
     print(f"\nACCOUNT {i} | ****{acc['phone'][-4:]}")
 
     if not await client.is_user_authorized():
         print("OTP required")
-
         await client.send_code_request(acc["phone"])
         code = input("OTP: ").strip()
 
@@ -78,12 +88,12 @@ async def login_account(i, acc):
         print("Session saved")
 
     else:
-        print("Auto login OK")
+        print("Auto login")
 
     return client
 
 # =========================
-# LOAD ACCOUNTS
+# LOAD ACCOUNTS (ACTIVE ONLY)
 # =========================
 
 async def load_all():
@@ -95,7 +105,11 @@ async def load_all():
         print("No accounts found")
         return
 
-    for i, acc in enumerate(accounts, 1):
+    active_accounts = [a for a in accounts if a.get("active", True)]
+
+    print(f"\nLoading {len(active_accounts)} ACTIVE accounts...\n")
+
+    for i, acc in enumerate(active_accounts, 1):
         client = await login_account(i, acc)
         clients.append(client)
 
@@ -124,8 +138,33 @@ async def add_account():
 
 def show_accounts():
     print("\n=== ACCOUNTS ===")
+
     for i, acc in enumerate(accounts, 1):
-        print(f"[{i}] {acc['phone']} | {acc['session']}")
+        status = "ACTIVE" if acc.get("active", True) else "DISABLED"
+        print(f"[{i}] {status} | {acc['phone']}")
+
+# =========================
+# DISABLE / ENABLE
+# =========================
+
+def disable_account():
+    show_accounts()
+    idx = int(input("Disable account #: ")) - 1
+
+    if 0 <= idx < len(accounts):
+        accounts[idx]["active"] = False
+        save_db(accounts)
+        print("Account disabled")
+
+
+def enable_account():
+    show_accounts()
+    idx = int(input("Enable account #: ")) - 1
+
+    if 0 <= idx < len(accounts):
+        accounts[idx]["active"] = True
+        save_db(accounts)
+        print("Account enabled")
 
 # =========================
 # REACTION
@@ -140,10 +179,10 @@ async def send_reaction(client, chat, msg_id):
         reaction=[ReactionEmoji(emoticon=emoji)]
     ))
 
-    print("Reaction sent:", emoji)
+    print("Reaction:", emoji)
 
 # =========================
-# JOIN
+# JOIN / LEAVE
 # =========================
 
 async def join_chat(client, link):
@@ -151,28 +190,20 @@ async def join_chat(client, link):
         entity = await client.get_entity(link)
         await client(JoinChannelRequest(entity))
         print("Joined:", link)
-
-    except UserAlreadyParticipantError:
-        print("Already joined")
-
     except Exception as e:
         print("Join error:", e)
 
-# =========================
-# LEAVE
-# =========================
 
 async def leave_chat(client, link):
     try:
         entity = await client.get_entity(link)
         await client(LeaveChannelRequest(entity))
         print("Left:", link)
-
     except Exception as e:
         print("Leave error:", e)
 
 # =========================
-# ACTIONS (ALL ACCOUNTS)
+# ACTIONS (ONLY ACTIVE ACCOUNTS)
 # =========================
 
 async def reaction_all(link):
@@ -180,27 +211,29 @@ async def reaction_all(link):
     msg_id = int(msg_id)
 
     for i, client in enumerate(clients, 1):
-        print(f"\nACCOUNT {i}")
         await send_reaction(client, chat, msg_id)
         await asyncio.sleep(2)
 
+
 async def join_all(link):
-    for i, client in enumerate(clients, 1):
-        print(f"\nACCOUNT {i}")
+    for client in clients:
         await join_chat(client, link)
         await asyncio.sleep(2)
 
+
 async def leave_all(link):
-    for i, client in enumerate(clients, 1):
-        print(f"\nACCOUNT {i}")
+    for client in clients:
         await leave_chat(client, link)
         await asyncio.sleep(2)
 
 # =========================
-# MAIN MENU
+# MAIN
 # =========================
 
 async def main():
+    banner()
+    loading()
+
     await load_all()
 
     while True:
@@ -208,10 +241,12 @@ async def main():
 ========================
 1. Add Account
 2. Show Accounts
-3. Reaction
-4. Join Group/Channel
-5. Leave Group/Channel
-6. Exit
+3. Disable Account
+4. Enable Account
+5. Reaction
+6. Join Group/Channel
+7. Leave Group/Channel
+8. Exit
 ========================
 """)
 
@@ -224,14 +259,20 @@ async def main():
             show_accounts()
 
         elif choice == "3":
-            link = input("chat_id/message_id (e.g. channel/123): ")
-            await reaction_all(link)
+            disable_account()
 
         elif choice == "4":
+            enable_account()
+
+        elif choice == "5":
+            link = input("chat/msg (channel/123): ")
+            await reaction_all(link)
+
+        elif choice == "6":
             link = input("Join link: ")
             await join_all(link)
 
-        elif choice == "5":
+        elif choice == "7":
             link = input("Leave link: ")
             await leave_all(link)
 
