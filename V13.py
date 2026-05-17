@@ -1,8 +1,6 @@
 import asyncio
 import json
 import os
-import random
-import time
 
 from telethon import TelegramClient, functions
 from telethon.errors import SessionPasswordNeededError
@@ -20,8 +18,9 @@ DB_FILE = os.path.join(BASE_DIR, "accounts.json")
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(SESSION_DIR, exist_ok=True)
 
-clients = []
 accounts = []
+clients = {}  # phone -> client
+default_account = None
 
 REACTIONS = ["👍", "❤️", "🔥", "😂", "😮"]
 
@@ -34,11 +33,22 @@ def clear():
 
 def banner():
     print("""
-====================================
- TELEGRAM CONTROL PANEL (SAFE AUTO)
-====================================
-DM | GROUP | REPLY | JOIN | LEAVE | STORY ASSIST
-====================================
+========================
+ TELEGRAM CONTROL PANEL
+========================
+1. Add Account
+2. Show Accounts
+3. Enable Account
+4. Disable Account
+5. Change Default Account
+6. Send DM
+7. Send Group Message
+8. Reply by Link
+9. Reaction (Single Account)
+10. Join Group
+11. Leave Group
+12. Exit
+========================
 """)
 
 # =========================
@@ -54,21 +64,21 @@ def load_db():
             return []
     return []
 
-def save_db(data):
+def save_db():
     with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(accounts, f, indent=2)
 
 # =========================
 # LOGIN
 # =========================
 
-async def login_account(i, acc):
+async def login_account(acc):
     session_path = os.path.join(SESSION_DIR, acc["session"])
 
     client = TelegramClient(session_path, acc["api_id"], acc["api_hash"])
     await client.connect()
 
-    print(f"\nACCOUNT {i} | ****{acc['phone'][-4:]}")
+    print(f"\nLOGIN | {acc['phone']}")
 
     if not await client.is_user_authorized():
         print("OTP required")
@@ -85,7 +95,7 @@ async def login_account(i, acc):
     else:
         print("Auto login")
 
-    return client
+    clients[acc["phone"]] = client
 
 # =========================
 # LOAD ACCOUNTS
@@ -106,97 +116,96 @@ async def load_all():
         unique.append(acc)
 
     accounts = unique
-    save_db(accounts)
+    save_db()
 
-    for i, acc in enumerate(accounts, 1):
+    for acc in accounts:
         if acc.get("active", True):
             try:
-                c = await login_account(i, acc)
-                clients.append(c)
+                await login_account(acc)
             except Exception as e:
                 print("Login error:", e)
 
 # =========================
-# ACCOUNT VIEW
+# HELPERS
+# =========================
+
+def get_active_accounts():
+    return [a for a in accounts if a.get("active", True)]
+
+def select_account():
+    show_accounts()
+    try:
+        i = int(input("Select account #: ")) - 1
+        if i < 0 or i >= len(accounts):
+            return None
+        return accounts[i]
+    except:
+        return None
+
+# =========================
+# SHOW
 # =========================
 
 def show_accounts():
-    print("\n=== ACCOUNTS ===")
-    for i, a in enumerate(accounts, 1):
-        status = "ACTIVE" if a.get("active", True) else "DISABLED"
-        print(f"[{i}] {status} | {a['phone']}")
+    print("\n=== ACCOUNTS ===\n")
 
-# =========================
-# CLIENT ACTIVE LIST
-# =========================
+    if not accounts:
+        print("No accounts found")
+        return
 
-def active_pairs():
-    return [(c, a) for c, a in zip(clients, accounts) if a.get("active", True)]
+    for i, acc in enumerate(accounts, 1):
+        status = "ACTIVE" if acc.get("active", True) else "DISABLED"
+        mark = " (DEFAULT)" if acc["phone"] == default_account else ""
+        print(f"[{i}] {status} | {acc['phone']}{mark}")
 
 # =========================
 # RESOLVE
 # =========================
 
-async def resolve_entity(client, target):
-    target = str(target).replace("https://t.me/", "").replace("@", "")
+async def resolve(client, target):
+    target = target.replace("https://t.me/", "").replace("@", "")
     try:
         return await client.get_entity(target)
     except:
         return None
 
 # =========================
-# SAFE SEND
-# =========================
-
-async def safe_send(client, entity, msg):
-    try:
-        return await client.send_message(entity, msg)
-    except Exception as e:
-        print("Send error:", e)
-
-# =========================
-# DM
+# FEATURES
 # =========================
 
 async def send_dm():
-    show_accounts()
-    c_index = int(input("Select account #: ")) - 1
-
-    if c_index < 0 or c_index >= len(clients):
+    acc = select_account()
+    if not acc:
         return
 
-    c = clients[c_index]
+    client = clients.get(acc["phone"])
+    if not client:
+        print("Not logged in")
+        return
+
     target = input("User: ")
     msg = input("Message: ")
 
-    entity = await resolve_entity(c, target)
+    entity = await resolve(client, target)
     if not entity:
         print("Not found")
         return
 
-    await safe_send(c, entity, msg)
+    await client.send_message(entity, msg)
     print("DM sent")
 
-# =========================
-# STORY ASSISTANT MODE (SAFE AUTO)
-# =========================
+async def reaction_single():
+    acc = select_account()
+    if not acc:
+        return
 
-async def story_assistant():
-    link = input("Story/Post link: ").strip()
+    client = clients.get(acc["phone"])
+    if not client:
+        print("Not logged in")
+        return
 
-    print("""
-Choose reaction mode:
-1. 👍
-2. ❤️
-3. 🔥
-4. 😂
-5. 😮
-6. Random per account
-""")
-
-    mode = input("Choice: ").strip()
-
-    parts = link.replace("https://t.me/", "").strip("/").split("/")
+    link = input("Post link: ").replace("https://t.me/", "").strip("/")
+    parts = link.split("/")
 
     if len(parts) < 2:
         print("Invalid link")
@@ -205,64 +214,50 @@ Choose reaction mode:
     chat = parts[0]
     msg_id = int(parts[1])
 
-    pairs = active_pairs()
+    print("1. 👍 2. ❤️ 3. 🔥 4. 😂 5. 😮")
+    r = input("Reaction: ")
 
-    print("\n=== STARTING SAFE AUTO ASSISTANT ===\n")
+    reaction = REACTIONS[int(r)-1] if r.isdigit() and 1 <= int(r) <= 5 else "👍"
 
-    for idx, (client, acc) in enumerate(pairs, 1):
+    entity = await client.get_entity(chat)
 
-        if mode == "1":
-            reaction = "👍"
-        elif mode == "2":
-            reaction = "❤️"
-        elif mode == "3":
-            reaction = "🔥"
-        elif mode == "4":
-            reaction = "😂"
-        elif mode == "5":
-            reaction = "😮"
-        else:
-            reaction = random.choice(REACTIONS)
+    await client(functions.messages.SendReactionRequest(
+        peer=entity,
+        msg_id=msg_id,
+        reaction=[ReactionEmoji(emoticon=reaction)]
+    ))
 
-        try:
-            entity = await client.get_entity(chat)
-
-            await client(functions.messages.SendReactionRequest(
-                peer=entity,
-                msg_id=msg_id,
-                reaction=[ReactionEmoji(emoticon=reaction)]
-            ))
-
-            print(f"[{idx}] {acc['phone']} → {reaction} ✔ SENT")
-
-        except Exception as e:
-            print(f"[{idx}] {acc['phone']} → FAILED: {e}")
-
-        time.sleep(1.5)  # SAFE DELAY
+    print("Reaction sent")
 
 # =========================
 # JOIN / LEAVE
 # =========================
 
-async def join_all():
-    link = input("Group link: ")
-    for c, _ in active_pairs():
-        try:
-            entity = await c.get_entity(link)
-            await c(JoinChannelRequest(entity))
-            print("Joined")
-        except:
-            pass
+async def join_group():
+    acc = select_account()
+    if not acc:
+        return
 
-async def leave_all():
+    client = clients.get(acc["phone"])
     link = input("Group link: ")
-    for c, _ in active_pairs():
-        try:
-            entity = await c.get_entity(link)
-            await c(LeaveChannelRequest(entity))
-            print("Left")
-        except:
-            pass
+
+    entity = await client.get_entity(link)
+    await client(JoinChannelRequest(entity))
+
+    print("Joined")
+
+async def leave_group():
+    acc = select_account()
+    if not acc:
+        return
+
+    client = clients.get(acc["phone"])
+    link = input("Group link: ")
+
+    entity = await client.get_entity(link)
+    await client(LeaveChannelRequest(entity))
+
+    print("Left")
 
 # =========================
 # MAIN
@@ -273,36 +268,30 @@ async def main():
     banner()
     await load_all()
 
+    global default_account
+
     while True:
-        print("""
-========================
-1. Show Accounts
-2. Send DM
-3. Story Assistant Mode (SAFE AUTO)
-4. Join Group
-5. Leave Group
-6. Exit
-========================
-""")
+        choice = input("Choose: ")
 
-        ch = input("Choose: ")
+        if choice == "2":
+            show_accounts()
 
-        if ch == "2":
+        elif choice == "6":
             await send_dm()
 
-        elif ch == "3":
-            await story_assistant()
+        elif choice == "9":
+            await reaction_single()
 
-        elif ch == "4":
-            await join_all()
+        elif choice == "10":
+            await join_group()
 
-        elif ch == "5":
-            await leave_all()
+        elif choice == "11":
+            await leave_group()
 
         else:
             break
 
-    for c in clients:
+    for c in clients.values():
         try:
             await c.disconnect()
         except:
